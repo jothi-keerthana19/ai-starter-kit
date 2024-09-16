@@ -11,8 +11,13 @@ import plotly.graph_objects as go
 import plotly.express as px
 import io
 from dateutil import parser
+import altair as alt
+import requests
+import json
+from transformers import pipeline
 
-current_dir = os.path.dirname(os.path.abspath(_file_))
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
 kit_dir = os.path.abspath(os.path.join(current_dir, ".."))
 repo_dir = os.path.abspath(os.path.join(kit_dir, ".."))
 
@@ -287,6 +292,103 @@ def predict_stock_prices(stock_data, days_ahead=7):
         st.plotly_chart(bar_fig)
     else:
         st.error("The lengths of future dates and predicted prices do not match.")
+# Add this function to compare multiple stock dataframes
+def compare_stock_data(stock_data_list):
+    # Combine the stock data into a single DataFrame with a multi-index
+    combined_df = pd.concat(stock_data_list, keys=[f'Stock {i+1}' for i in range(len(stock_data_list))])
+
+    # Aggregate summary statistics
+    combined_summary = combined_df.groupby(level=0).agg(
+        Total_Volume=('Volume', 'sum'),
+        Avg_Open=('Open', 'mean'),
+        Avg_Close=('Close', 'mean')
+    ).reset_index()
+
+    # Display the comparison summary
+    st.write("Comparison Summary of Uploaded Stock Data:")
+    st.write(combined_summary)
+
+    # Remove the visualization code to focus on the comparison table
+    # If needed, you can add further analysis or insights here.
+
+# Function for the Q&A section
+nlp = pipeline("question-answering")
+
+# Function to load dataset (accepts CSV or Excel)
+def load_dataset(uploaded_file):
+    if uploaded_file is not None:
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)  # Pass the uploaded file directly
+        elif uploaded_file.name.endswith('.xlsx'):
+            df = pd.read_excel(uploaded_file)  # Pass the uploaded file directly
+        else:
+            raise ValueError("Unsupported file format. Please upload a CSV or Excel file.")
+
+        # Check the columns
+        st.write("Columns in DataFrame:", df.columns.tolist())
+        return df
+    else:
+        raise ValueError("No file uploaded.")
+
+# Sample context generation from dataset for answering queries
+def generate_context_from_df(df):
+    context = ""
+    for index, row in df.iterrows():
+        context += f"On {row['Date']}, {row['Symbol']} had an opening price of {row['Open']}, a high of {row['High']}, a low of {row['Low']}, and a closing price of {row['Close']}. The volume traded was {row['Volume']}. "
+    return context
+
+# Function to generate recommendations based on stock trends
+def generate_recommendation(df):
+    avg_close = df['Close'].mean()
+    latest_close = df['Close'].iloc[-1]
+    if latest_close > avg_close:
+        return "The latest closing price is above the average closing price. Consider holding or buying more shares."
+    else:
+        return "The latest closing price is below the average closing price. It might be a good time to evaluate selling options."
+
+# Function to generate insights based on stock performance
+def generate_insight(df):
+    df['Price Change'] = df['Close'].diff()
+    volatility = df['Price Change'].std()
+    max_close = df['Close'].max()
+    max_close_date = df[df['Close'] == max_close]['Date'].iloc[0]
+
+    insights = (
+        f"The average closing price for the last month is {df['Close'].mean():.2f}.\n"
+        f"The highest closing price was {max_close} on {max_close_date}.\n"
+        f"The stock shows a volatility of {volatility:.2f}, indicating fluctuations in price."
+    )
+    return insights
+
+# Function to generate the best time to invest
+def best_time_to_invest(df):
+    df['Date'] = pd.to_datetime(df['Date'])  # Ensure the 'Date' column is in datetime format
+    buy_signal = df[df['Close'] < df['Close'].rolling(window=5).mean()]  # Buy when current close is below the 5-day average
+    if not buy_signal.empty:
+        best_dates = buy_signal['Date'].dt.date.unique()  # Get unique dates to buy
+        return f"Consider investing on the following dates: {', '.join(map(str, best_dates))}."
+    else:
+        return "No specific dates are suggested for investment based on the analysis."
+
+# Function to process user query
+def answer_user_query(user_query, context, df):
+    user_query_lower = user_query.lower()
+
+    if "suggest" in user_query_lower or "recommend" in user_query_lower:
+        return generate_recommendation(df)
+    elif "insight" in user_query_lower or "insights" in user_query_lower:
+        return generate_insight(df)
+    elif "best time to invest" in user_query_lower:
+        return best_time_to_invest(df)
+    else:
+        query = {
+            'question': user_query,
+            'context': context
+        }
+        result = nlp(query)
+        return result['answer']
+
+# Main fun
 
 def main():
     os.environ['SAMBANOVA_API_KEY'] = 'cf430214-2555-48f2-848d-6e823dd07679'
@@ -363,8 +465,59 @@ def main():
 
         if st.button("Predict Future Prices"):
             predict_stock_prices(stock_data, days_ahead=days_ahead)
+        st.title("Stock Data Comparison Tool")
+
+    # File uploader for CSV files
+    uploaded_files = st.file_uploader("Upload Stock Data CSV Files", type="csv", accept_multiple_files=True)
+
+    stock_data_list = []
+
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            # Read the uploaded CSV file into a DataFrame
+            stock_data = pd.read_csv(uploaded_file)
+            stock_data_list.append(stock_data)
+
+        # Call the function to compare stock data
+        compare_stock_data(stock_data_list)
+
+        st.title("Stock Data Question Answering System")
+
+    # Upload CSV or Excel file
+    uploaded_file = st.file_uploader("Upload your dataset (CSV or Excel)", type=['csv', 'xlsx'])
+
+    if uploaded_file is not None:
+        try:
+            # Load the dataset
+            df = load_dataset(uploaded_file)
+
+            # Generate context from the dataset
+            context = generate_context_from_df(df)
+
+            # Input for user query
+            user_query = st.text_input("Please enter your question:")
+
+            if user_query:
+                # Get the answer based on the dataset
+                answer = answer_user_query(user_query, context, df)
+                st.write(f"**Answer:** {answer}")
+
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+
+# Entry point for the script
+
+# Entry point for the script
+
+        # Additional content for stock data comparison goes here
+        # Remove the visualization button
+        # Uncomment or remove the following lines if you had a visualization button
+        # if st.button("Visualize Data"):
+        #     visualize_stock_data(stock_data_list)
+
+        # Ensure there are no leftover visualization button statements
+        # Any reference to visualizations should be removed or commented out
 
 
-
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
