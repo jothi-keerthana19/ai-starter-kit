@@ -44,3 +44,8 @@ weave==0.51.1
 # unstructured_inference==0.7.36
 # unstructured_pytesseract==0.3.12
 # pytesseract==0.3.10
+
+requests
+json
+altair
+transformers
